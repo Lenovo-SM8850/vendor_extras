@@ -289,6 +289,7 @@ public class AxPlatformClient {
         @Override
         public void onServiceConnected(ComponentName name, IBinder service) {
             mService = IAxPlatformService.Stub.asInterface(service);
+            mHandler.removeCallbacksAndMessages(AxPlatformClient.this);
             Log.d(TAG, "Connected to AxPlatform service");
             reregisterListeners();
         }
@@ -303,8 +304,14 @@ public class AxPlatformClient {
         @Override
         public void onBindingDied(ComponentName name) {
             mService = null;
-            mBound = false;
             Log.w(TAG, "Binding died, reconnecting");
+            scheduleReconnect();
+        }
+
+        @Override
+        public void onNullBinding(ComponentName name) {
+            mService = null;
+            Log.w(TAG, "Null binding, reconnecting");
             scheduleReconnect();
         }
     };
@@ -351,7 +358,23 @@ public class AxPlatformClient {
 
     private void scheduleReconnect() {
         mHandler.removeCallbacksAndMessages(this);
-        mHandler.postDelayed(this::bind, this, RECONNECT_DELAY_MS);
+        mHandler.postDelayed(this::reconnect, this, RECONNECT_DELAY_MS);
+    }
+
+    private void reconnect() {
+        synchronized (mLock) {
+            // Allow the framework to reconnect first; replace only a stalled binding.
+            if (mService != null || mContext == null) return;
+            if (mBound) {
+                try {
+                    mContext.unbindService(mConnection);
+                } catch (IllegalArgumentException e) {
+                    Log.w(TAG, "Connection already unregistered", e);
+                }
+                mBound = false;
+            }
+            bind();
+        }
     }
 
     private void reregisterListeners() {
